@@ -6,8 +6,8 @@ from collections import deque
 VIDEO_SOURCE       = 'video.mp4'
 MIN_WIDTH          = 80
 MIN_HEIGHT         = 80
-CALIBRATION_DIST   = 10       # real-world meters between line1 and line2
-PIXELS_PER_METER   = 8.0      # tune: pixels per meter for your camera
+CALIBRATION_DIST   = 10       #real-world meters between line1 and line2
+PIXELS_PER_METER   = 8.0      #tune: pixels per meter for your camera
 SPEED_LIMIT        = 60       # km/h
 LINE1_Y            = 400      # first detection line (yellow)
 LINE2_Y            = 550      # second detection line / counting line (magenta)
