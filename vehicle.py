@@ -3,7 +3,6 @@ import numpy as np
 import time
 from collections import deque
 
-# ─── CONFIG ───────────────────────────────────────────────────────────────────
 VIDEO_SOURCE       = 'video.mp4'
 MIN_WIDTH          = 80
 MIN_HEIGHT         = 80
@@ -17,7 +16,7 @@ LINE_OFFSET        = 8        # crossing tolerance in pixels
 ALERT_DURATION     = 3        # seconds overspeed alert stays on screen
 SPEED_SMOOTH       = 5        # rolling average window for live speed
 HUD_WIDTH          = 280      # right-side info panel width
-# ──────────────────────────────────────────────────────────────────────────────
+
 
 cap = cv.VideoCapture(VIDEO_SOURCE)
 FPS = cap.get(cv.CAP_PROP_FPS) or 30
@@ -52,13 +51,13 @@ def draw_hud(canvas, total, overspd, avg_spd, log):
     def txt(text, y, color=(200, 200, 200), scale=0.55, thick=1):
         cv.putText(panel, text, (10, y), cv.FONT_HERSHEY_SIMPLEX, scale, color, thick)
 
-    txt("── VEHICLE MONITOR ──", 30, (0, 220, 255), 0.55, 1)
+    txt(" VEHICLE MONITOR", 30, (0, 220, 255), 0.55, 1)
     txt(f"Counted   : {total}",  65, (0, 255, 100))
     txt(f"Overspeed : {overspd}", 95, (0, 80, 255) if overspd > 0 else (0, 255, 100))
     txt(f"Avg Speed : {avg_spd} km/h", 125, (255, 200, 0))
     txt(f"Limit     : {SPEED_LIMIT} km/h", 155, (0, 200, 255))
 
-    txt("── Speed Log ──", 190, (180, 180, 180), 0.5)
+    txt("Speed Log ", 190, (180, 180, 180), 0.5)
     for i, (vid, spd, flag) in enumerate(reversed(log[-12:])):
         color = (0, 80, 255) if flag else (0, 255, 150)
         marker = " !" if flag else "  "
