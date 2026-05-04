@@ -6,11 +6,11 @@ from collections import deque
 VIDEO_SOURCE       = 'video.mp4'
 MIN_WIDTH          = 80
 MIN_HEIGHT         = 80
-CALIBRATION_DIST   = 10       #real-world meters between line1 and line2
-PIXELS_PER_METER   = 8.0      #tune: pixels per meter for your camera
-SPEED_LIMIT        = 60       # km/h
 LINE1_Y            = 400      # first detection line (yellow)
 LINE2_Y            = 550      # second detection line / counting line (magenta)
+CALIBRATION_DIST   = 10       # real-world meters between line1 and line2
+PIXELS_PER_METER   = abs(LINE2_Y - LINE1_Y) / CALIBRATION_DIST  # auto-derived: 15 px/m
+SPEED_LIMIT        = 80       # km/h
 MATCH_THRESHOLD    = 80       # max pixel distance to match same vehicle
 LINE_OFFSET        = 8        # crossing tolerance in pixels
 ALERT_DURATION     = 3        # seconds overspeed alert stays on screen
@@ -19,7 +19,13 @@ HUD_WIDTH          = 280      # right-side info panel width
 
 
 cap = cv.VideoCapture(VIDEO_SOURCE)
-FPS = cap.get(cv.CAP_PROP_FPS) or 30
+if not cap.isOpened():
+    raise RuntimeError(f"Cannot open video source: {VIDEO_SOURCE}")
+_fps = cap.get(cv.CAP_PROP_FPS)
+if not _fps or _fps <= 0:
+    print("[WARN] Could not read FPS from source, defaulting to 30")
+    _fps = 30
+FPS = _fps
 
 algo = cv.bgsegm.createBackgroundSubtractorMOG()
 
@@ -109,7 +115,7 @@ while True:
         if best_id is None:
             best_id = vid_count
             tracked[best_id] = {
-                'cx': cx, 'cy': cy, 'prev_cy': cy,
+                'cx': cx, 'cy': cy,
                 'line1_time': None, 'line2_time': None,
                 'speed': 0, 'live_speed': 0,
                 'counted': False, 'overspeed': False,
@@ -122,14 +128,15 @@ while True:
         vd = tracked[best_id]
 
         # ── Update position & direction ──
-        vd['direction'] = 'down' if cy >= vd['cy'] else 'up'
-        vd['prev_cy']   = vd['cy']
+        prev_cy = vd['cy']
+        vd['direction'] = 'down' if cy >= prev_cy else 'up'
         vd['cx'], vd['cy'] = cx, cy
 
-        # ── Live speed (pixel displacement) ──
-        pixel_diff = abs(cy - vd['prev_cy'])
+        # ── Live speed (pixel displacement per frame → km/h) ──
+        pixel_diff = abs(cy - prev_cy)
         if pixel_diff > 0:
-            raw_spd = round((pixel_diff / PIXELS_PER_METER) * FPS * 3.6, 1)
+            meters_per_sec = (pixel_diff / PIXELS_PER_METER) * FPS
+            raw_spd = round(meters_per_sec * 3.6, 1)
             speed_history[best_id].append(raw_spd)
             vd['live_speed'] = round(sum(speed_history[best_id]) / len(speed_history[best_id]), 1)
 
@@ -151,15 +158,18 @@ while True:
             counter += 1
             vd['counted'] = True
             confirmed = vd['speed'] if vd['speed'] > 0 else vd['live_speed']
-            speed_log.append((best_id, confirmed, vd['overspeed']))
+            if confirmed > 0:                          # skip zero-speed entries from avg
+                is_over = confirmed > SPEED_LIMIT
+                vd['overspeed'] = is_over
+                speed_log.append((best_id, confirmed, is_over))
 
             if vd['overspeed']:
                 overspeed_count += 1
-                msg = f"OVERSPEED! #{best_id}  {vd['speed']} km/h"
+                msg = f"OVERSPEED! #{best_id}  {confirmed:.1f} km/h"
                 overspeed_alerts.append((msg, current_time + ALERT_DURATION))
-                print(f"[OVERSPEED] Vehicle #{best_id} — {vd['speed']} km/h")
+                print(f"[OVERSPEED] Vehicle #{best_id} — {confirmed:.1f} km/h")
             else:
-                print(f"[COUNT] Vehicle #{best_id} — {confirmed} km/h | Total: {counter}")
+                print(f"[COUNT] Vehicle #{best_id} — {confirmed:.1f} km/h | Total: {counter}")
 
         # ── Draw bounding box ──
         display_speed = vd['speed'] if vd['speed'] > 0 else vd['live_speed']
@@ -180,11 +190,14 @@ while True:
             cv.putText(frame, "OVERSPEED", (x, y + h + 16),
                        cv.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 255), 2)
 
-    # ── Cleanup stale vehicles ──
+    # ── Cleanup stale vehicles (all exit directions + timeout) ──
     for vid in list(tracked):
-        if vid not in matched_ids and tracked[vid]['cy'] > frame_h + 20:
-            del tracked[vid]
-            speed_history.pop(vid, None)
+        if vid not in matched_ids:
+            vcy = tracked[vid]['cy']
+            vcx = tracked[vid]['cx']
+            if vcy > frame_h + 20 or vcy < -20 or vcx < -20 or vcx > frame_w + 20:
+                del tracked[vid]
+                speed_history.pop(vid, None)
 
     # ── Overspeed alert banner (flashing) ──
     overspeed_alerts = [(m, e) for m, e in overspeed_alerts if e > current_time]
@@ -197,10 +210,11 @@ while True:
                    cv.FONT_HERSHEY_SIMPLEX, 0.85, (255, 255, 255), 2)
 
     # ── Top HUD on frame ──
-    avg_speed = round(sum(s for _, s, _ in speed_log) / len(speed_log), 1) if speed_log else 0.0
-    cv.rectangle(frame, (0, 0), (360, 50), (20, 20, 20), -1)
-    cv.putText(frame, f"COUNT: {counter}  |  OVERSPEED: {overspeed_count}",
-               (10, 32), cv.FONT_HERSHEY_SIMPLEX, 0.8, (0, 220, 255), 2)
+    valid_speeds = [s for _, s, _ in speed_log if s > 0]
+    avg_speed = round(sum(valid_speeds) / len(valid_speeds), 1) if valid_speeds else 0.0
+    cv.rectangle(frame, (0, 0), (420, 50), (20, 20, 20), -1)
+    cv.putText(frame, f"COUNT: {counter}  |  OVERSPEED: {overspeed_count}  |  LIMIT: {SPEED_LIMIT}km/h",
+               (10, 32), cv.FONT_HERSHEY_SIMPLEX, 0.65, (0, 220, 255), 2)
 
     # ── Attach side HUD panel ──
     output = draw_hud(frame, counter, overspeed_count, avg_speed, speed_log)
